@@ -12,6 +12,7 @@ node_modules
 # Production credentials (never commit)
 server/production.cjs
 *.pem
+logs/
 dist
 dist-ssr
 *.local

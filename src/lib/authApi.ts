@@ -1,8 +1,9 @@
-import { getEnvMode } from "./envConfig";
+import { getApiBase } from "./envConfig";
 
 function getBase() {
-  const mode = getEnvMode();
-  return mode === "production" ? "http://localhost:3002" : "http://localhost:3001";
+  const base = getApiBase();
+  // getApiBase returns "/api" suffix, strip it — authApi adds its own paths
+  return base.replace(/\/api$/, "");
 }
 
 const TOKEN_KEY = "td_auth_token";

@@ -3,7 +3,15 @@ export type EnvMode = "development" | "production";
 
 const ENV_STORAGE_KEY = "datahub_env";
 
-const API_PORTS: Record<EnvMode, number> = {
+// In deployed mode, API runs behind nginx on the same domain
+// In local dev, API runs on separate ports
+function getOrigin(): string {
+  return window.location.origin; // e.g. https://dashboard.trajectdata.com or http://localhost:8080
+}
+
+const isLocalDev = () => window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+const LOCAL_PORTS: Record<EnvMode, number> = {
   development: 3001,
   production: 3002,
 };
@@ -22,5 +30,9 @@ export function setEnvMode(mode: EnvMode) {
 
 export function getApiBase(mode?: EnvMode): string {
   const m = mode ?? getEnvMode();
-  return `http://localhost:${API_PORTS[m]}/api`;
+  if (isLocalDev()) {
+    return `http://localhost:${LOCAL_PORTS[m]}/api`;
+  }
+  // Deployed: nginx proxies /api/* to the backend
+  return `${getOrigin()}/api`;
 }
