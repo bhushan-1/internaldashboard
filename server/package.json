@@ -1,0 +1,14 @@
+{
+  "name": "datahub-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node index.cjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "mongodb": "^6.12.0",
+    "ssh2": "^1.17.0"
+  }
+}
