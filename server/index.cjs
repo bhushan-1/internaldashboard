@@ -1,6 +1,9 @@
 const dns = require("dns");
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
+// Load .env file if present
+try { require("dotenv").config(); } catch { /* dotenv optional */ }
+
 const crypto = require("crypto");
 const express = require("express");
 const bcrypt = require("bcryptjs");
