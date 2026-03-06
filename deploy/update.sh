@@ -1,22 +1,14 @@
 #!/bin/bash
-# Quick update — run after pushing changes to GitHub
-# Usage: bash deploy/update.sh
+# Quick redeploy after pushing changes to GitHub
+# Run as: ssh root@YOUR_VPS_IP 'bash -s' < deploy/update.sh
 
 set -e
-APP_DIR="/opt/internaldashboard"
+echo "🔄 Updating TrajectData Dashboard..."
 
-cd "$APP_DIR"
-echo "Pulling latest..."
-git pull origin main
+cd /home/tdapp/app
+su - tdapp -c "cd /home/tdapp/app && git pull origin main"
+su - tdapp -c "cd /home/tdapp/app && npm install"
+su - tdapp -c "cd /home/tdapp/app && npm run build"
 
-echo "Installing dependencies..."
-npm ci
-cd server && npm ci && cd ..
-
-echo "Building frontend..."
-npm run build
-
-echo "Restarting API..."
-pm2 restart td-api
-
-echo "Done! Dashboard updated."
+systemctl restart td-backend
+echo "✅ Updated and restarted!"
