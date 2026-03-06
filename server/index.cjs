@@ -1,8 +1,12 @@
 const dns = require("dns");
 dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
-// Load .env file if present
-try { require("dotenv").config(); } catch { /* dotenv optional */ }
+// Load environment-specific .env file
+const path = require("path");
+try {
+  const envFile = process.env.NODE_ENV === "production" ? ".env.production" : ".env";
+  require("dotenv").config({ path: path.resolve(__dirname, "..", envFile) });
+} catch { /* dotenv optional */ }
 
 const crypto = require("crypto");
 const express = require("express");
@@ -21,7 +25,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,X-No-Encrypt");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -31,15 +35,19 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-// ── Config ──
-const MONGO_URI = "mongodb+srv://bhushandasari_db_user:xQL1NV0sZHs7Iygg@cluster25.twjatkb.mongodb.net/";
-const DB_NAME = "Test30";
-const COLLECTION = "Test user details";
-const AUTH_COLLECTION = "_td_users";
-const PORT = 3001;
-
-// Anthropic API key for Confluence AI
+// ── Config (from .env / .env.production) ──
+const MONGO_URI = process.env.MONGO_URI;
+const DB_NAME = process.env.MONGO_DB_NAME;
+const COLLECTION = process.env.MONGO_COLLECTION;
+const AUTH_COLLECTION = process.env.MONGO_AUTH_COLLECTION || "_td_users";
+const PORT = parseInt(process.env.PORT, 10) || 3001;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+
+if (!MONGO_URI || !DB_NAME || !COLLECTION) {
+  console.error("[Config] Missing required env vars: MONGO_URI, MONGO_DB_NAME, MONGO_COLLECTION");
+  console.error("[Config] Copy .env.example to .env and fill in your values");
+  process.exit(1);
+}
 
 // ── Security keys (fresh each server start) ──
 const JWT_SECRET = crypto.randomBytes(32).toString("hex");
@@ -56,6 +64,10 @@ function encrypt(data) {
   return { iv: iv.toString("base64"), data: enc };
 }
 function sendEncrypted(res, payload) {
+  // Skip encryption if client signals it can't decrypt (non-secure context)
+  if (res.req && res.req.headers["x-no-encrypt"] === "1") {
+    return res.json(payload);
+  }
   res.json({ _enc: true, payload: encrypt(payload) });
 }
 
@@ -331,36 +343,53 @@ app.post("/api/confluence/ask", requireAuth, async (req, res) => {
       ? scored.map(d => `[${d.title}] (${d.category})\n${d.content}`).join("\n\n---\n\n")
       : "No relevant documents found.";
 
-    // Call Anthropic API server-side
+    // Call AI provider
+    const aiConfig = await getEffectiveAIConfig();
+    const activeKey = aiConfig.effectiveKey;
+    const systemPrompt = `You are an internal knowledge assistant for TrajectData. Answer questions ONLY using the provided document context. If the context doesn't contain relevant information, say so clearly. Be concise and helpful. Do not make up information.\n\nDocument context:\n${context}`;
+
     let answer = "No relevant documents found to answer your question. Please ask an admin to upload related documents.";
-    if (scored.length > 0 && ANTHROPIC_API_KEY) {
+    if (scored.length > 0 && activeKey) {
       try {
-        const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1024,
-            system: `You are an internal knowledge assistant for TrajectData. Answer questions ONLY using the provided document context. If the context doesn't contain relevant information, say so clearly. Be concise and helpful. Do not make up information.\n\nDocument context:\n${context}`,
-            messages: [{ role: "user", content: question }],
-          }),
-        });
-        const apiData = await apiRes.json();
-        if (apiData.content) {
-          answer = apiData.content.map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n");
-        } else if (apiData.error) {
-          answer = `AI service error: ${apiData.error.message || "Unknown error"}. The matched documents are still available.`;
+        let apiRes, apiData;
+        if (aiConfig.provider === "anthropic") {
+          const model = aiConfig.model || "claude-sonnet-4-20250514";
+          apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": activeKey, "anthropic-version": "2023-06-01" },
+            body: JSON.stringify({ model, max_tokens: 1024, system: systemPrompt, messages: [{ role: "user", content: question }] }),
+          });
+          apiData = await apiRes.json();
+          if (apiData.content) {
+            answer = apiData.content.map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n");
+          } else if (apiData.error) {
+            answer = `AI service error: ${apiData.error.message || "Unknown error"}`;
+          }
+        } else {
+          // OpenAI and OpenRouter both use the OpenAI-compatible chat completions format
+          const isOpenRouter = aiConfig.provider === "openrouter";
+          const baseUrl = isOpenRouter ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1";
+          const defaultModel = isOpenRouter ? "anthropic/claude-sonnet-4" : "gpt-4o";
+          const model = aiConfig.model || defaultModel;
+          const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${activeKey}` };
+          if (isOpenRouter) headers["HTTP-Referer"] = "https://dashboard.trajectdata.com";
+          apiRes = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ model, max_tokens: 1024, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: question }] }),
+          });
+          apiData = await apiRes.json();
+          if (apiData.choices?.[0]?.message?.content) {
+            answer = apiData.choices[0].message.content;
+          } else if (apiData.error) {
+            answer = `AI service error: ${apiData.error.message || "Unknown error"}`;
+          }
         }
       } catch (apiErr) {
-        console.error("[Confluence] Anthropic API error:", apiErr.message);
+        console.error(`[Confluence] ${aiConfig.provider} API error:`, apiErr.message);
         answer = `Could not reach AI service. Here's what I found in ${scored.length} document(s):\n\n${scored.map(d => `• ${d.title}: ${d.content.slice(0, 200)}...`).join("\n")}`;
       }
-    } else if (!ANTHROPIC_API_KEY) {
-      // No API key — return document excerpts as fallback
+    } else if (!activeKey) {
       answer = scored.length > 0
         ? `[AI key not configured — showing raw matches]\n\n${scored.map(d => `📄 ${d.title} (${d.category}):\n${d.content.slice(0, 300)}${d.content.length > 300 ? "..." : ""}`).join("\n\n")}`
         : "No relevant documents found. Ask an admin to upload related documents.";
@@ -371,6 +400,91 @@ app.post("/api/confluence/ask", requireAuth, async (req, res) => {
 
     sendEncrypted(res, { success: true, answer, matchCount: scored.length, totalDocs: docs.length, sourceDocs });
   } catch (err) { sendEncrypted(res, { success: false, error: err.message }); }
+});
+
+// ══════════════════════════════════════
+//  CONFIG ENDPOINTS (admin only)
+// ══════════════════════════════════════
+const CONFIG_COLLECTION = "_td_config";
+
+// Helper to get a config value (DB overrides env)
+async function getConfigValue(key) {
+  try {
+    const d = await connectDB();
+    const doc = await d.collection(CONFIG_COLLECTION).findOne({ key });
+    return doc?.value ?? null;
+  } catch { return null; }
+}
+
+async function setConfigValue(key, value, email) {
+  const d = await connectDB();
+  if (value === "" || value === null) {
+    await d.collection(CONFIG_COLLECTION).deleteOne({ key });
+  } else {
+    await d.collection(CONFIG_COLLECTION).updateOne(
+      { key },
+      { $set: { key, value, updatedBy: email, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+  }
+}
+
+// AI provider configuration
+const AI_PROVIDERS = {
+  anthropic: { name: "Anthropic", envKey: "ANTHROPIC_API_KEY", prefix: "sk-ant-" },
+  openai: { name: "OpenAI", envKey: "OPENAI_API_KEY", prefix: "sk-" },
+  openrouter: { name: "OpenRouter", envKey: "OPENROUTER_API_KEY", prefix: "sk-or-" },
+};
+
+function maskKey(key) {
+  if (!key || key.length < 14) return key ? "****" : "";
+  return `${key.slice(0, 10)}...${key.slice(-4)}`;
+}
+
+async function getEffectiveAIConfig() {
+  const provider = (await getConfigValue("AI_PROVIDER")) || process.env.AI_PROVIDER || "anthropic";
+  const providerInfo = AI_PROVIDERS[provider] || AI_PROVIDERS.anthropic;
+  const dbKey = await getConfigValue(`${provider.toUpperCase()}_API_KEY`);
+  const envKey = process.env[providerInfo.envKey] || "";
+  const effectiveKey = dbKey || envKey;
+  const model = (await getConfigValue("AI_MODEL")) || process.env.AI_MODEL || null; // null = use default per provider
+  return { provider, effectiveKey, dbKey, envKey, model };
+}
+
+// Get config (admin only)
+app.get("/api/config", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { provider, effectiveKey, dbKey, envKey, model } = await getEffectiveAIConfig();
+    sendEncrypted(res, {
+      success: true,
+      config: {
+        aiProvider: provider,
+        aiApiKey: maskKey(effectiveKey),
+        aiKeySource: dbKey ? "dashboard" : (envKey ? "env" : "none"),
+        aiKeyConfigured: !!effectiveKey,
+        aiModel: model || "",
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Update config (admin only)
+app.put("/api/config", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { aiProvider, aiApiKey, aiModel } = req.body;
+    if (aiProvider !== undefined) {
+      if (!AI_PROVIDERS[aiProvider]) return res.status(400).json({ error: "Invalid provider. Use: anthropic, openai, openrouter" });
+      await setConfigValue("AI_PROVIDER", aiProvider, req.user.email);
+    }
+    if (aiApiKey !== undefined) {
+      const provider = aiProvider || (await getConfigValue("AI_PROVIDER")) || "anthropic";
+      await setConfigValue(`${provider.toUpperCase()}_API_KEY`, aiApiKey, req.user.email);
+    }
+    if (aiModel !== undefined) {
+      await setConfigValue("AI_MODEL", aiModel, req.user.email);
+    }
+    sendEncrypted(res, { success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get("/api/health", async (req, res) => {

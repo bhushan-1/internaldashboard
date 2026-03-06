@@ -28,11 +28,7 @@ export function setEnvMode(mode: EnvMode) {
   localStorage.setItem(ENV_STORAGE_KEY, mode);
 }
 
-export function getApiBase(mode?: EnvMode): string {
-  const m = mode ?? getEnvMode();
-  if (isLocalDev()) {
-    return `http://localhost:${LOCAL_PORTS[m]}/api`;
-  }
-  // Deployed: nginx proxies /api/* to the backend
-  return `${getOrigin()}/api`;
+export function getApiBase(_mode?: EnvMode): string {
+  // Always use relative /api path — Vite proxy (dev) or nginx (prod) handles routing
+  return `/api`;
 }

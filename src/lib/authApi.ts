@@ -1,4 +1,5 @@
 import { getApiBase } from "./envConfig";
+import { canDecrypt, noEncryptHeaders, decryptPayload, clearCryptoCache } from "./crypto";
 
 function getBase() {
   const base = getApiBase();
@@ -35,20 +36,7 @@ export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(ENC_KEY_KEY);
   localStorage.removeItem(USER_KEY);
-}
-
-// ── Decrypt helper ──
-async function decrypt(payload: { iv: string; data: string }): Promise<unknown> {
-  const encKeyHex = getEncKey();
-  if (!encKeyHex) throw new Error("No encryption key");
-  const key = await crypto.subtle.importKey(
-    "raw", Uint8Array.from(encKeyHex.match(/.{2}/g)!.map(b => parseInt(b, 16))),
-    { name: "AES-CBC" }, false, ["decrypt"]
-  );
-  const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
-  const ciphertext = Uint8Array.from(atob(payload.data), c => c.charCodeAt(0));
-  const plain = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, key, ciphertext);
-  return JSON.parse(new TextDecoder().decode(plain));
+  clearCryptoCache();
 }
 
 async function authFetch(url: string, options: RequestInit = {}): Promise<unknown> {
@@ -56,12 +44,16 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<unknow
   if (!token) throw new Error("Not authenticated");
   const res = await fetch(getBase() + url, {
     ...options,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, ...options.headers },
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, ...noEncryptHeaders(), ...options.headers },
   });
   if (res.status === 401) { clearAuth(); throw new Error("Session expired"); }
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-  if (json._enc) return decrypt(json.payload);
+  if (json._enc) {
+    const encKeyHex = getEncKey();
+    if (!encKeyHex) throw new Error("No encryption key");
+    return decryptPayload(json.payload, encKeyHex);
+  }
   return json;
 }
 
@@ -128,5 +120,27 @@ export async function deleteUser(userId: string): Promise<void> {
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   await authFetch("/api/auth/password", {
     method: "PUT", body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+// ── Admin: config management ──
+export type AIProvider = "anthropic" | "openai" | "openrouter";
+
+export interface AppConfig {
+  aiProvider: AIProvider;
+  aiApiKey: string;
+  aiKeySource: "dashboard" | "env" | "none";
+  aiKeyConfigured: boolean;
+  aiModel: string;
+}
+
+export async function getConfig(): Promise<AppConfig> {
+  const data = await authFetch("/api/config") as { success: boolean; config: AppConfig };
+  return data.config;
+}
+
+export async function updateConfig(config: { aiProvider?: AIProvider; aiApiKey?: string; aiModel?: string }): Promise<void> {
+  await authFetch("/api/config", {
+    method: "PUT", body: JSON.stringify(config),
   });
 }

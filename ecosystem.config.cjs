@@ -1,12 +1,14 @@
+const path = require("path");
+
 module.exports = {
   apps: [
     {
       name: "td-api",
       script: "server/index.cjs",
       cwd: __dirname,
+      env_file: path.resolve(__dirname, ".env.production"),
       env: {
         NODE_ENV: "production",
-        PORT: 3001,
       },
       instances: 1,
       autorestart: true,

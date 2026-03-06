@@ -1,44 +1,21 @@
 import { getApiBase } from "./envConfig";
 import { getToken } from "./authApi";
-
-let encryptionKey: CryptoKey | null = null;
-
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-async function ensureEncKey(): Promise<void> {
-  if (encryptionKey) return;
-  const encKeyHex = localStorage.getItem("td_enc_key");
-  if (!encKeyHex) throw new Error("Not authenticated");
-  encryptionKey = await crypto.subtle.importKey(
-    "raw", hexToBytes(encKeyHex), { name: "AES-CBC" }, false, ["decrypt"]
-  );
-}
-
-async function decryptPayload(encrypted: { iv: string; data: string }): Promise<unknown> {
-  if (!encryptionKey) throw new Error("No encryption key");
-  const iv = Uint8Array.from(atob(encrypted.iv), c => c.charCodeAt(0));
-  const ciphertext = Uint8Array.from(atob(encrypted.data), c => c.charCodeAt(0));
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, encryptionKey, ciphertext);
-  return JSON.parse(new TextDecoder().decode(decrypted));
-}
+import { noEncryptHeaders, decryptPayload } from "./crypto";
 
 async function secureFetch(url: string, options: RequestInit = {}): Promise<unknown> {
-  await ensureEncKey();
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
   const res = await fetch(url, {
     ...options,
-    headers: { ...(options.headers || {}), Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    headers: { ...(options.headers || {}), Authorization: "Bearer " + token, "Content-Type": "application/json", ...noEncryptHeaders() },
   });
   if (res.status === 401) throw new Error("Session expired");
   const json = await res.json();
-  if (json._enc) return decryptPayload(json.payload);
+  if (json._enc) {
+    const encKeyHex = localStorage.getItem("td_enc_key");
+    if (!encKeyHex) throw new Error("No encryption key");
+    return decryptPayload(json.payload, encKeyHex);
+  }
   return json;
 }
 
