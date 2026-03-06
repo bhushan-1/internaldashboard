@@ -21,11 +21,12 @@ import {
 
 const COMPONENTS = [
   { name: "dashboard", label: "Dashboard" },
-  { name: "wilddeer", label: "WildDeer" },
+  { name: "wilddeer", label: "WildDeer (View)" },
+  { name: "wilddeer-edit", label: "WildDeer (Edit)" },
+  { name: "confluence", label: "Confluence" },
   { name: "credits", label: "Credits" },
   { name: "account-lookup", label: "Account Lookup" },
   { name: "stripe", label: "Stripe" },
-  { name: "users", label: "Users" },
   { name: "activity", label: "Activity" },
 ];
 
@@ -148,7 +149,7 @@ const AdminSettingsPage = () => {
         </div>
 
         <Tabs defaultValue="users" className="space-y-4">
-          <TabsList><TabsTrigger value="users" className="gap-2"><Users className="w-4 h-4" />Users & Roles</TabsTrigger><TabsTrigger value="permissions" className="gap-2"><Shield className="w-4 h-4" />Permissions</TabsTrigger></TabsList>
+          <TabsList><TabsTrigger value="users" className="gap-2"><Users className="w-4 h-4" />Users & Roles</TabsTrigger><TabsTrigger value="permissions" className="gap-2"><Shield className="w-4 h-4" />Privileges</TabsTrigger></TabsList>
 
           <TabsContent value="users">
             <Card>
@@ -184,7 +185,7 @@ const AdminSettingsPage = () => {
 
           <TabsContent value="permissions">
             <Card>
-              <CardHeader><CardTitle>Component Permissions</CardTitle><CardDescription>Control access per user. Admins have full access by default.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Privileges</CardTitle><CardDescription>Control access and edit permissions per user. Enable "WildDeer (Edit)" to allow data editing — without it, users can only view.</CardDescription></CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <Table>

@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+server/node_modules
 
 # Production credentials (never commit)
 server/production.cjs

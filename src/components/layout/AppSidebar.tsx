@@ -1,15 +1,14 @@
 import { 
-  LayoutDashboard, 
   CreditCard, 
   Database, 
-  Zap, 
+  Zap,
   Settings, 
-  Users,
   Activity,
   FileSearch,
   LogIn,
   LogOut,
-  Shield
+  Shield,
+  BotMessageSquare,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useNavigate } from "react-router-dom";
@@ -40,8 +39,7 @@ interface NavItem {
 }
 
 const mainItems: NavItem[] = [
-  { title: "Overview", url: "/", icon: LayoutDashboard, componentName: "dashboard", requiresAuth: true },
-  { title: "Users", url: "/users", icon: Users, componentName: "users", requiresAuth: true },
+  { title: "Confluence", url: "/confluence", icon: BotMessageSquare, componentName: "confluence", requiresAuth: true },
   { title: "Activity", url: "/activity", icon: Activity, componentName: "activity", requiresAuth: true },
 ];
 

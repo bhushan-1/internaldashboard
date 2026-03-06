@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2, Key } from "lucide-react";
-import { updatePassword } from "@/lib/db";
+import { changePassword } from "@/lib/authApi";
 
 export const ChangePasswordDialog = () => {
   const { user } = useAuth();
@@ -34,12 +34,10 @@ export const ChangePasswordDialog = () => {
     setIsLoading(true);
     try {
       if (!user) throw new Error("Not logged in");
-      const { error } = await updatePassword(user.id, newPassword);
-      if (error) { toast.error(error); } else {
-        toast.success("Password changed successfully");
-        await logActivity({ action: "password_change" });
-        setOpen(false); setNewPassword(""); setConfirmPassword("");
-      }
+      await changePassword("", newPassword);
+      toast.success("Password changed successfully");
+      await logActivity({ action: "password_change" });
+      setOpen(false); setNewPassword(""); setConfirmPassword("");
     } catch { toast.error("Failed to change password"); }
     finally { setIsLoading(false); }
   };

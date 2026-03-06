@@ -6,8 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import Index from "./pages/Index";
-import UsersPage from "./pages/UsersPage";
 import ActivityPage from "./pages/ActivityPage";
 import WildDeerPage from "./pages/WildDeerPage";
 import StripePage from "./pages/StripePage";
@@ -15,6 +13,7 @@ import CreditsPage from "./pages/CreditsPage";
 import AccountLookupPage from "./pages/AccountLookupPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminSettingsPage from "./pages/AdminSettingsPage";
+import ConfluencePage from "./pages/ConfluencePage";
 import LoginPage from "./pages/LoginPage";
 import NotFound from "./pages/NotFound";
 
@@ -31,13 +30,13 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={
-              <ProtectedRoute componentName="dashboard">
-                <Index />
+              <ProtectedRoute componentName="confluence">
+                <ConfluencePage />
               </ProtectedRoute>
             } />
-            <Route path="/users" element={
-              <ProtectedRoute componentName="users">
-                <UsersPage />
+            <Route path="/confluence" element={
+              <ProtectedRoute componentName="confluence">
+                <ConfluencePage />
               </ProtectedRoute>
             } />
             <Route path="/activity" element={

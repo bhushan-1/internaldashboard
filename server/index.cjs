@@ -35,6 +35,9 @@ const COLLECTION = "Test user details";
 const AUTH_COLLECTION = "_td_users";
 const PORT = 3001;
 
+// Anthropic API key for Confluence AI
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+
 // ── Security keys (fresh each server start) ──
 const JWT_SECRET = crypto.randomBytes(32).toString("hex");
 const ENCRYPTION_KEY = crypto.randomBytes(32);
@@ -265,6 +268,108 @@ app.get("/api/plans", requireAuth, async (req, res) => {
   } catch (err) { sendEncrypted(res, { success: false, error: err.message }); }
 });
 
+// ══════════════════════════════════════
+//  CONFLUENCE / KNOWLEDGE BASE
+// ══════════════════════════════════════
+const KB_COLLECTION = "_td_knowledge_base";
+
+// Upload document (admin only)
+app.post("/api/confluence/documents", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { title, content, category } = req.body;
+    if (!title || !content) return res.status(400).json({ error: "Title and content required" });
+    const d = await connectDB();
+    const r = await d.collection(KB_COLLECTION).insertOne({
+      title, content, category: category || "General",
+      uploadedBy: req.user.email, uploadedAt: new Date().toISOString(),
+    });
+    sendEncrypted(res, { success: true, id: r.insertedId.toString() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// List documents
+app.get("/api/confluence/documents", requireAuth, async (req, res) => {
+  try {
+    const d = await connectDB();
+    const docs = await d.collection(KB_COLLECTION).find({}).sort({ uploadedAt: -1 }).toArray();
+    sendEncrypted(res, { success: true, data: docs.map(d => ({
+      id: d._id.toString(), title: d.title, content: d.content,
+      category: d.category, uploadedBy: d.uploadedBy, uploadedAt: d.uploadedAt,
+    })) });
+  } catch (err) { sendEncrypted(res, { success: false, error: err.message }); }
+});
+
+// Delete document (admin only)
+app.delete("/api/confluence/documents/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const d = await connectDB();
+    await d.collection(KB_COLLECTION).deleteOne({ _id: new ObjectId(req.params.id) });
+    sendEncrypted(res, { success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ask AI - searches documents, calls Anthropic API, returns answer
+app.post("/api/confluence/ask", requireAuth, async (req, res) => {
+  try {
+    const { question } = req.body;
+    if (!question) return res.status(400).json({ error: "Question required" });
+    const d = await connectDB();
+    const docs = await d.collection(KB_COLLECTION).find({}).toArray();
+
+    // Simple keyword search — score documents by matching words
+    const qWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const scored = docs.map(doc => {
+      const text = (doc.title + " " + doc.content + " " + doc.category).toLowerCase();
+      const score = qWords.reduce((s, w) => s + (text.includes(w) ? 1 : 0), 0);
+      return { ...doc, score };
+    }).filter(d => d.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+
+    const context = scored.length > 0
+      ? scored.map(d => `[${d.title}] (${d.category})\n${d.content}`).join("\n\n---\n\n")
+      : "No relevant documents found.";
+
+    // Call Anthropic API server-side
+    let answer = "No relevant documents found to answer your question. Please ask an admin to upload related documents.";
+    if (scored.length > 0 && ANTHROPIC_API_KEY) {
+      try {
+        const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: `You are an internal knowledge assistant for TrajectData. Answer questions ONLY using the provided document context. If the context doesn't contain relevant information, say so clearly. Be concise and helpful. Do not make up information.\n\nDocument context:\n${context}`,
+            messages: [{ role: "user", content: question }],
+          }),
+        });
+        const apiData = await apiRes.json();
+        if (apiData.content) {
+          answer = apiData.content.map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n");
+        } else if (apiData.error) {
+          answer = `AI service error: ${apiData.error.message || "Unknown error"}. The matched documents are still available.`;
+        }
+      } catch (apiErr) {
+        console.error("[Confluence] Anthropic API error:", apiErr.message);
+        answer = `Could not reach AI service. Here's what I found in ${scored.length} document(s):\n\n${scored.map(d => `• ${d.title}: ${d.content.slice(0, 200)}...`).join("\n")}`;
+      }
+    } else if (!ANTHROPIC_API_KEY) {
+      // No API key — return document excerpts as fallback
+      answer = scored.length > 0
+        ? `[AI key not configured — showing raw matches]\n\n${scored.map(d => `📄 ${d.title} (${d.category}):\n${d.content.slice(0, 300)}${d.content.length > 300 ? "..." : ""}`).join("\n\n")}`
+        : "No relevant documents found. Ask an admin to upload related documents.";
+    }
+
+    // Build source references
+    const sourceDocs = scored.map(d => ({ id: d._id.toString(), title: d.title, category: d.category, excerpt: d.content.slice(0, 150) }));
+
+    sendEncrypted(res, { success: true, answer, matchCount: scored.length, totalDocs: docs.length, sourceDocs });
+  } catch (err) { sendEncrypted(res, { success: false, error: err.message }); }
+});
+
 app.get("/api/health", async (req, res) => {
   try {
     const d = await connectDB();
@@ -285,5 +390,6 @@ app.get("/api/env", (req, res) => {
   app.listen(PORT, () => {
     console.log("[Server] Running on http://localhost:" + PORT);
     console.log("[Security] Auth + AES-256 encryption active");
+    console.log("[Confluence] AI mode:", ANTHROPIC_API_KEY ? "Anthropic API (full AI answers)" : "Fallback (document excerpts only — set ANTHROPIC_API_KEY for AI)");
   });
 })();

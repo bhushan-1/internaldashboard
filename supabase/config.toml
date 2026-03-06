@@ -1,7 +1,0 @@
-project_id = "sznbfgnicpnfujnsorfl"
-
-[functions.mongodb]
-verify_jwt = false
-
-[functions.manage-users]
-verify_jwt = false

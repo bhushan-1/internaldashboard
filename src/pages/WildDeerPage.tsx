@@ -25,6 +25,7 @@ import { toast } from "@/components/ui/sonner";
 import { fetchMongoAccounts, updateMongoAccount, fetchPlans, clearApiAuth, checkServerHealth } from "@/lib/mongoApi";
 import type { MongoAccount, MongoPlan } from "@/lib/mongoApi";
 import { getEnvMode, setEnvMode, type EnvMode } from "@/lib/envConfig";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ═══════════════════════════════════════════
 //  CONSTANTS
@@ -141,6 +142,9 @@ function exportCSV(data: MongoAccount[], cols: string[], filename: string) {
 //  COMPONENT
 // ═══════════════════════════════════════════
 const WildDeerPage = () => {
+  // ── Permissions ──
+  const { hasAccess } = usePermissions();
+  const canEdit = hasAccess("wilddeer-edit");
   // ── State ──
   const [isLoading, setIsLoading] = useState(false);
   const [accounts, setAccounts] = useState<MongoAccount[]>([]);
@@ -825,10 +829,10 @@ const WildDeerPage = () => {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
                               onClick={e => { e.stopPropagation(); openView(acc); }}><Eye className="w-3.5 h-3.5" /></Button>
                           </TooltipTrigger><TooltipContent>View</TooltipContent></Tooltip>
-                          <Tooltip><TooltipTrigger asChild>
+                          {canEdit && <Tooltip><TooltipTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
                               onClick={e => { e.stopPropagation(); openEdit(acc); }}><Pencil className="w-3.5 h-3.5" /></Button>
-                          </TooltipTrigger><TooltipContent>Edit</TooltipContent></Tooltip>
+                          </TooltipTrigger><TooltipContent>Edit</TooltipContent></Tooltip>}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -917,9 +921,9 @@ const WildDeerPage = () => {
             </ScrollArea>
             <DialogFooter>
               <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
-              <Button onClick={() => { setViewOpen(false); if (viewAccount) openEdit(viewAccount); }}>
+              {canEdit && <Button onClick={() => { setViewOpen(false); if (viewAccount) openEdit(viewAccount); }}>
                 <Pencil className="w-3.5 h-3.5 mr-1.5" />Edit
-              </Button>
+              </Button>}
             </DialogFooter>
           </DialogContent>
         </Dialog>
